@@ -1,5 +1,6 @@
 import { App, ExpressReceiver } from '@slack/bolt';
 import { config } from './config';
+import { initTokenStore } from './services/token-store';
 import { createOAuthRouter } from './handlers/oauth';
 import { registerAppHomeHandlers } from './handlers/app-home';
 import { registerActionHandlers } from './handlers/actions';
@@ -21,6 +22,7 @@ registerAppHomeHandlers(app);
 registerActionHandlers(app);
 
 (async () => {
+  await initTokenStore();
   await app.start(config.port);
   console.log(`⚡ Team Calendar running on port ${config.port}`);
   console.log(`   Google OAuth redirect: ${config.google.redirectUri}`);

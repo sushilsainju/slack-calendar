@@ -34,9 +34,9 @@ export async function getTeamStatuses(
       status: 'not_connected',
     };
 
-    if (!isConnected(user.id!)) return base;
+    if (!(await isConnected(user.id!))) return base;
 
-    const record = getTokenRecord(user.id!);
+    const record = await getTokenRecord(user.id!);
     if (!record) return base;
 
     try {
@@ -44,7 +44,7 @@ export async function getTeamStatuses(
 
       // Persist refreshed tokens if the Google client refreshed them
       if (result.newTokens) {
-        saveTokens(user.id!, record.googleEmail, result.newTokens);
+        await saveTokens(user.id!, record.googleEmail, result.newTokens);
       }
 
       return { ...base, status: result.status, statusLabel: result.statusLabel };

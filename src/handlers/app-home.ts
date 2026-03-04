@@ -27,7 +27,7 @@ export async function publishHomeView(app: App, userId: string, state: ViewState
 
   const [members, connected] = await Promise.all([
     getTeamStatuses(app.client, targetDate, state.filter),
-    Promise.resolve(isConnected(userId)),
+    isConnected(userId),
   ]);
 
   const view = buildHomeView(members, state, connected);

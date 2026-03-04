@@ -75,7 +75,7 @@ export function registerActionHandlers(app: App): void {
   app.action<BlockAction>('disconnect_google_calendar', async ({ body, ack }) => {
     await ack();
     const userId = body.user.id;
-    removeTokens(userId);
+    await removeTokens(userId);
     await publishHomeView(app, userId, { date: todayString(), filter: 'all' });
   });
 }

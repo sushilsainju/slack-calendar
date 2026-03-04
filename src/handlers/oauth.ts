@@ -19,7 +19,7 @@ export function createOAuthRouter(app: App): Router {
 
     try {
       const { tokens, email } = await exchangeCode(code);
-      saveTokens(slackUserId, email, tokens);
+      await saveTokens(slackUserId, email, tokens);
 
       // Refresh the App Home so the user sees their connected status immediately
       publishHomeView(app, slackUserId, { date: todayString(), filter: 'all' }).catch((err) =>
