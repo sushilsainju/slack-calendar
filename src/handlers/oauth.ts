@@ -1,14 +1,15 @@
 import { Router } from 'express';
-import { App } from '@slack/bolt';
+import { WebClient } from '@slack/web-api';
 import { exchangeCode } from '../services/google-calendar';
 import { saveTokens } from '../services/token-store';
 import { consumeOAuthState } from '../services/oauth-state';
+import { installationStore } from '../services/installation-store';
 import { invalidateUserStatus } from '../services/team-status';
 import { publishHomeView, todayString } from './app-home';
 import { escapeHtml } from '../utils/html';
 import { logger } from '../utils/logger';
 
-export function createOAuthRouter(app: App): Router {
+export function createOAuthRouter(): Router {
   const router = Router();
 
   router.get('/oauth/google/callback', async (req, res) => {
@@ -24,9 +25,9 @@ export function createOAuthRouter(app: App): Router {
       );
     }
 
-    let slackUserId: string | null;
+    let oauthState: { slackUserId: string; teamId: string } | null;
     try {
-      slackUserId = await consumeOAuthState(nonce);
+      oauthState = await consumeOAuthState(nonce);
     } catch (err) {
       logger.error({ err }, '[oauth] Failed to consume OAuth state');
       return res.status(500).send(
@@ -34,7 +35,7 @@ export function createOAuthRouter(app: App): Router {
       );
     }
 
-    if (!slackUserId) {
+    if (!oauthState) {
       return res.status(400).send(
         html(
           '❌ Link Expired',
@@ -43,18 +44,26 @@ export function createOAuthRouter(app: App): Router {
       );
     }
 
+    const { slackUserId, teamId } = oauthState;
+
     try {
       const { tokens, email } = await exchangeCode(code);
-      await saveTokens(slackUserId, email, tokens);
-      invalidateUserStatus(slackUserId);
+      await saveTokens(teamId, slackUserId, email, tokens);
+      invalidateUserStatus(teamId, slackUserId);
 
-      // Refresh the App Home so the user sees their connected status immediately
-      publishHomeView(app, slackUserId, {
-        date: todayString(),
-        filter: 'all',
-      }).catch((err) =>
-        logger.error({ slackUserId, err }, '[oauth] Failed to refresh home view after connect'),
-      );
+      // Refresh the App Home using the workspace's bot token
+      installationStore
+        .fetchInstallation({ teamId, enterpriseId: undefined, isEnterpriseInstall: false })
+        .then((installation) => {
+          const client = new WebClient(installation.bot?.token);
+          return publishHomeView(client, teamId, slackUserId, {
+            date: todayString(),
+            filter: 'all',
+          });
+        })
+        .catch((err) =>
+          logger.error({ teamId, slackUserId, err }, '[oauth] Failed to refresh home view after connect'),
+        );
 
       return res.send(
         html(
@@ -65,7 +74,7 @@ export function createOAuthRouter(app: App): Router {
         ),
       );
     } catch (err) {
-      logger.error({ slackUserId, err }, '[oauth] Callback error');
+      logger.error({ teamId, slackUserId, err }, '[oauth] Callback error');
       return res.send(
         html(
           '❌ Authorization Failed',

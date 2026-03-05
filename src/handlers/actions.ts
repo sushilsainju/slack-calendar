@@ -1,8 +1,7 @@
 import { App, BlockAction, ButtonAction } from '@slack/bolt';
 import { publishHomeView, todayString } from './app-home';
-import { removeTokens } from '../services/token-store';
+import { removeTokens, getTokenRecord } from '../services/token-store';
 import { getAuthUrl, revokeTokens } from '../services/google-calendar';
-import { getTokenRecord } from '../services/token-store';
 import { invalidateUserStatus } from '../services/team-status';
 import { ViewState } from '../types';
 import { logger } from '../utils/logger';
@@ -21,40 +20,39 @@ function getButtonValue(action: unknown): string {
 
 export function registerActionHandlers(app: App): void {
   // ── Date navigation ──────────────────────────────────────────────────────────
-  app.action<BlockAction>(/^navigate_/, async ({ action, body, ack }) => {
+  app.action<BlockAction>(/^navigate_/, async ({ action, body, ack, client }) => {
     await ack();
     const state = parseState(getButtonValue(action));
-    await publishHomeView(app, body.user.id, { ...state, page: 0 });
+    await publishHomeView(client, body.team?.id ?? '', body.user.id, { ...state, page: 0 });
   });
 
   // ── Status filter ────────────────────────────────────────────────────────────
-  app.action<BlockAction>(/^filter_/, async ({ action, body, ack }) => {
+  app.action<BlockAction>(/^filter_/, async ({ action, body, ack, client }) => {
     await ack();
     const state = parseState(getButtonValue(action));
-    await publishHomeView(app, body.user.id, { ...state, page: 0 });
+    await publishHomeView(client, body.team?.id ?? '', body.user.id, { ...state, page: 0 });
   });
 
   // ── Refresh ──────────────────────────────────────────────────────────────────
-  app.action<BlockAction>('refresh_view', async ({ action, body, ack }) => {
+  app.action<BlockAction>('refresh_view', async ({ action, body, ack, client }) => {
     await ack();
     const state = parseState(getButtonValue(action));
-    await publishHomeView(app, body.user.id, state);
+    await publishHomeView(client, body.team?.id ?? '', body.user.id, state);
   });
 
   // ── Pagination ───────────────────────────────────────────────────────────────
-  app.action<BlockAction>('paginate_next', async ({ action, body, ack }) => {
+  app.action<BlockAction>('paginate_next', async ({ action, body, ack, client }) => {
     await ack();
     const state = parseState(getButtonValue(action));
-    await publishHomeView(app, body.user.id, state);
+    await publishHomeView(client, body.team?.id ?? '', body.user.id, state);
   });
 
-  app.action<BlockAction>('paginate_prev', async ({ action, body, ack }) => {
+  app.action<BlockAction>('paginate_prev', async ({ action, body, ack, client }) => {
     await ack();
     const state = parseState(getButtonValue(action));
-    await publishHomeView(app, body.user.id, state);
+    await publishHomeView(client, body.team?.id ?? '', body.user.id, state);
   });
 
-  // No-op for the "Page X of Y" label button
   app.action<BlockAction>('paginate_noop', async ({ ack }) => {
     await ack();
   });
@@ -63,7 +61,8 @@ export function registerActionHandlers(app: App): void {
   app.action<BlockAction>('connect_google_calendar', async ({ body, ack, client }) => {
     await ack();
     const userId = body.user.id;
-    const authUrl = await getAuthUrl(userId);
+    const teamId = body.team?.id ?? '';
+    const authUrl = await getAuthUrl(userId, teamId);
 
     await client.views.open({
       trigger_id: body.trigger_id,
@@ -92,20 +91,18 @@ export function registerActionHandlers(app: App): void {
   });
 
   // ── Disconnect Google Calendar ───────────────────────────────────────────────
-  app.action<BlockAction>('disconnect_google_calendar', async ({ body, ack }) => {
+  app.action<BlockAction>('disconnect_google_calendar', async ({ body, ack, client }) => {
     await ack();
     const userId = body.user.id;
+    const teamId = body.team?.id ?? '';
 
-    // Revoke tokens with Google before removing from DB
-    const record = await getTokenRecord(userId);
-    if (record) {
-      await revokeTokens(record.tokens);
-    }
+    const record = await getTokenRecord(teamId, userId);
+    if (record) await revokeTokens(record.tokens);
 
-    await removeTokens(userId);
-    invalidateUserStatus(userId);
-    logger.info({ slackUserId: userId }, '[actions] User disconnected Google Calendar');
+    await removeTokens(teamId, userId);
+    invalidateUserStatus(teamId, userId);
+    logger.info({ teamId, slackUserId: userId }, '[actions] User disconnected Google Calendar');
 
-    await publishHomeView(app, userId, { date: todayString(), filter: 'all' });
+    await publishHomeView(client, teamId, userId, { date: todayString(), filter: 'all' });
   });
 }
