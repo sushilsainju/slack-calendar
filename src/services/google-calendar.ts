@@ -2,6 +2,8 @@ import { google } from 'googleapis';
 import { OAuth2Client } from 'google-auth-library';
 import { config } from '../config';
 import { GoogleTokens, MemberStatus } from '../types';
+import { createOAuthState } from './oauth-state';
+import { logger } from '../utils/logger';
 
 export interface CalendarStatus {
   status: MemberStatus;
@@ -16,12 +18,13 @@ function createOAuth2Client(): OAuth2Client {
   );
 }
 
-export function getAuthUrl(slackUserId: string): string {
+export async function getAuthUrl(slackUserId: string): Promise<string> {
   const auth = createOAuth2Client();
+  const state = await createOAuthState(slackUserId);
   return auth.generateAuthUrl({
     access_type: 'offline',
     scope: ['https://www.googleapis.com/auth/calendar.readonly'],
-    state: slackUserId,
+    state,
     prompt: 'consent', // force refresh_token to be returned
   });
 }
@@ -35,6 +38,19 @@ export async function exchangeCode(code: string): Promise<{ tokens: GoogleTokens
   const { data } = await oauth2.userinfo.get();
 
   return { tokens, email: data.email || 'unknown' };
+}
+
+export async function revokeTokens(tokens: GoogleTokens): Promise<void> {
+  if (!tokens.access_token) return;
+  try {
+    const auth = createOAuth2Client();
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    auth.setCredentials(tokens as any);
+    await auth.revokeToken(tokens.access_token);
+  } catch (err) {
+    // Non-fatal: token may have already expired; DB removal still proceeds
+    logger.warn({ err }, '[google-calendar] Token revocation failed — token may have already expired');
+  }
 }
 
 /**
