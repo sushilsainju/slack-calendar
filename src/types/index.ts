@@ -13,7 +13,7 @@ export interface UserTokenRecord {
 }
 
 /** Status for a team member on a given date */
-export type MemberStatus = 'available' | 'out_of_office' | 'in_meeting' | 'not_connected';
+export type MemberStatus = 'available' | 'out_of_office' | 'in_meeting' | 'not_connected' | 'unknown';
 
 export interface MemberStatusInfo {
   slackUserId: string;
@@ -30,4 +30,6 @@ export interface ViewState {
   /** ISO date string "YYYY-MM-DD" */
   date: string;
   filter: StatusFilter;
+  /** 0-indexed page for member list pagination; defaults to 0 */
+  page?: number;
 }
