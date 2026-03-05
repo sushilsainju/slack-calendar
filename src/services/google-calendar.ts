@@ -23,7 +23,10 @@ export async function getAuthUrl(slackUserId: string): Promise<string> {
   const state = await createOAuthState(slackUserId);
   return auth.generateAuthUrl({
     access_type: 'offline',
-    scope: ['https://www.googleapis.com/auth/calendar.readonly'],
+    scope: [
+      'https://www.googleapis.com/auth/calendar.readonly',
+      'https://www.googleapis.com/auth/userinfo.email',
+    ],
     state,
     prompt: 'consent', // force refresh_token to be returned
   });
