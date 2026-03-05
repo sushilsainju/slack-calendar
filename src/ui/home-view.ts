@@ -3,11 +3,14 @@ import { MemberStatusInfo, StatusFilter, ViewState } from '../types';
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Block = Record<string, any>;
 
+const PAGE_SIZE = 50;
+
 const STATUS_EMOJI: Record<string, string> = {
   available: ':large_green_circle:',
   out_of_office: ':red_circle:',
   in_meeting: ':large_yellow_circle:',
   not_connected: ':white_circle:',
+  unknown: ':grey_question:',
 };
 
 const STATUS_LABEL: Record<string, string> = {
@@ -15,6 +18,7 @@ const STATUS_LABEL: Record<string, string> = {
   out_of_office: 'Out of Office',
   in_meeting: 'In a Meeting',
   not_connected: 'Calendar not connected',
+  unknown: 'Status unavailable',
 };
 
 export function buildHomeView(
@@ -26,6 +30,7 @@ export function buildHomeView(
   const displayDate = parseLocalDate(state.date);
   const today = toDateString(new Date());
   const isToday = state.date === today;
+  const page = state.page ?? 0;
 
   const dateLabel = displayDate.toLocaleDateString('en-US', {
     weekday: 'long',
@@ -103,16 +108,20 @@ export function buildHomeView(
     blocks.push({ type: 'divider' });
   }
 
-  // ── Member list ──────────────────────────────────────────────────────────────
-  if (members.length === 0) {
+  // ── Member list (paginated) ──────────────────────────────────────────────────
+  const totalPages = Math.max(1, Math.ceil(members.length / PAGE_SIZE));
+  const clampedPage = Math.min(page, totalPages - 1);
+  const paged = members.slice(clampedPage * PAGE_SIZE, (clampedPage + 1) * PAGE_SIZE);
+
+  if (paged.length === 0) {
     blocks.push({
       type: 'section',
       text: { type: 'mrkdwn', text: '_No team members match this filter._' },
     });
   } else {
-    for (const member of members) {
-      const emoji = STATUS_EMOJI[member.status];
-      const label = member.statusLabel || STATUS_LABEL[member.status];
+    for (const member of paged) {
+      const emoji = STATUS_EMOJI[member.status] ?? ':grey_question:';
+      const label = member.statusLabel || STATUS_LABEL[member.status] || member.status;
       const contextElements: Block[] = [];
 
       if (member.avatarUrl) {
@@ -130,6 +139,49 @@ export function buildHomeView(
 
       blocks.push({ type: 'context', elements: contextElements });
     }
+  }
+
+  // ── Pagination controls ──────────────────────────────────────────────────────
+  if (totalPages > 1) {
+    const prevState: ViewState = { ...state, page: clampedPage - 1 };
+    const nextState: ViewState = { ...state, page: clampedPage + 1 };
+
+    blocks.push({
+      type: 'actions',
+      block_id: 'pagination',
+      elements: [
+        ...(clampedPage > 0
+          ? [
+              {
+                type: 'button' as const,
+                text: { type: 'plain_text' as const, text: '← Previous', emoji: true },
+                action_id: 'paginate_prev',
+                value: JSON.stringify(prevState),
+              },
+            ]
+          : []),
+        {
+          type: 'button' as const,
+          text: {
+            type: 'plain_text' as const,
+            text: `Page ${clampedPage + 1} of ${totalPages}`,
+            emoji: false,
+          },
+          action_id: 'paginate_noop',
+          value: JSON.stringify(state),
+        },
+        ...(clampedPage < totalPages - 1
+          ? [
+              {
+                type: 'button' as const,
+                text: { type: 'plain_text' as const, text: 'Next →', emoji: true },
+                action_id: 'paginate_next',
+                value: JSON.stringify(nextState),
+              },
+            ]
+          : []),
+      ],
+    });
   }
 
   blocks.push({ type: 'divider' });
@@ -182,6 +234,31 @@ export function buildHomeView(
   }
 
   return { type: 'home', blocks };
+}
+
+export function buildErrorView(state: ViewState): { type: 'home'; blocks: Block[] } {
+  return {
+    type: 'home',
+    blocks: [
+      {
+        type: 'header',
+        text: { type: 'plain_text', text: ':calendar: Team Calendar', emoji: true },
+      },
+      {
+        type: 'section',
+        text: {
+          type: 'mrkdwn',
+          text: ':warning: *Something went wrong loading your team calendar.*\n_This is usually a temporary issue. Try refreshing._',
+        },
+        accessory: {
+          type: 'button',
+          text: { type: 'plain_text', text: ':arrows_counterclockwise: Refresh', emoji: true },
+          action_id: 'refresh_view',
+          value: JSON.stringify(state),
+        },
+      },
+    ],
+  };
 }
 
 export function buildLoadingView(): { type: 'home'; blocks: Block[] } {

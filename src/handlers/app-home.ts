@@ -1,8 +1,9 @@
 import { App } from '@slack/bolt';
-import { buildHomeView, buildLoadingView, toDateString, parseLocalDate } from '../ui/home-view';
+import { buildHomeView, buildLoadingView, buildErrorView, toDateString, parseLocalDate } from '../ui/home-view';
 import { getTeamStatuses } from '../services/team-status';
 import { isConnected } from '../services/token-store';
 import { ViewState } from '../types';
+import { logger } from '../utils/logger';
 
 export function todayString(): string {
   return toDateString(new Date());
@@ -13,7 +14,6 @@ export function todayString(): string {
  * Call this whenever the state changes (date navigation, filter, connect/disconnect).
  */
 export async function publishHomeView(app: App, userId: string, state: ViewState): Promise<void> {
-  // targetDate at the current time of day so "in meeting" checks work for today
   const localDate = parseLocalDate(state.date);
   const now = new Date();
   const targetDate = new Date(
@@ -25,14 +25,27 @@ export async function publishHomeView(app: App, userId: string, state: ViewState
     now.getSeconds(),
   );
 
-  const [members, connected] = await Promise.all([
-    getTeamStatuses(app.client, targetDate, state.filter),
-    isConnected(userId),
-  ]);
+  try {
+    const [members, connected] = await Promise.all([
+      getTeamStatuses(app.client, targetDate, state.filter),
+      isConnected(userId),
+    ]);
 
-  const view = buildHomeView(members, state, connected);
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  await app.client.views.publish({ user_id: userId, view: view as any });
+    const view = buildHomeView(members, state, connected);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    await app.client.views.publish({ user_id: userId, view: view as any });
+  } catch (err) {
+    logger.error({ slackUserId: userId, err }, '[app-home] Failed to publish home view');
+    await app.client.views
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      .publish({ user_id: userId, view: buildErrorView(state) as any })
+      .catch((innerErr) => {
+        logger.error(
+          { slackUserId: userId, err: innerErr },
+          '[app-home] Failed to publish error view',
+        );
+      });
+  }
 }
 
 export function registerAppHomeHandlers(app: App): void {
