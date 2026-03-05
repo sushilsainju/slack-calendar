@@ -18,9 +18,9 @@ function createOAuth2Client(): OAuth2Client {
   );
 }
 
-export async function getAuthUrl(slackUserId: string): Promise<string> {
+export async function getAuthUrl(slackUserId: string, teamId: string): Promise<string> {
   const auth = createOAuth2Client();
-  const state = await createOAuthState(slackUserId);
+  const state = await createOAuthState(slackUserId, teamId);
   return auth.generateAuthUrl({
     access_type: 'offline',
     scope: [
