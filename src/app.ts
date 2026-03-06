@@ -6,6 +6,7 @@ import { invalidateRoster } from './services/team-status';
 import { createOAuthRouter } from './handlers/oauth';
 import { registerAppHomeHandlers } from './handlers/app-home';
 import { registerActionHandlers } from './handlers/actions';
+import { createStripeWebhookRouter } from './handlers/stripe-webhooks';
 import { logger } from './utils/logger';
 
 const receiver = new ExpressReceiver({
@@ -53,8 +54,48 @@ receiver.router.get('/', (_req, res) => {
 </html>`);
 });
 
+// Stripe webhook — must come before JSON body-parser middleware
+receiver.router.use(createStripeWebhookRouter());
+
 // Google OAuth callback
 receiver.router.use(createOAuthRouter());
+
+// Billing redirect pages
+receiver.router.get('/billing/success', (_req, res) => {
+  res.send(`<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Upgrade successful — Team Calendar</title>
+  <style>body{font-family:-apple-system,sans-serif;text-align:center;padding:80px;color:#1d1c1d}</style>
+</head>
+<body>
+  <h1>🎉 You're upgraded!</h1>
+  <p>Your workspace now has access to all Pro features.<br>Head back to Slack to try it out.</p>
+  <p><a href="slack://open">Open Slack</a></p>
+</body>
+</html>`);
+});
+
+receiver.router.get('/billing/cancel', (_req, res) => {
+  res.send(`<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Upgrade cancelled — Team Calendar</title>
+  <style>body{font-family:-apple-system,sans-serif;text-align:center;padding:80px;color:#1d1c1d}</style>
+</head>
+<body>
+  <h1>No worries</h1>
+  <p>Your plan hasn't changed. You can upgrade any time from the Team Calendar home tab.</p>
+  <p><a href="slack://open">Back to Slack</a></p>
+</body>
+</html>`);
+});
+
+receiver.router.get('/billing/return', (_req, res) => {
+  res.redirect('/billing/success');
+});
 
 // Slack event & action handlers
 registerAppHomeHandlers(app);
