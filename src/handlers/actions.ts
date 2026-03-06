@@ -53,8 +53,32 @@ export function registerActionHandlers(app: App): void {
     await publishHomeView(client, body.team?.id ?? '', body.user.id, state);
   });
 
-  app.action<BlockAction>('paginate_noop', async ({ ack }) => {
+  app.action<BlockAction>('paginate_noop', async ({ ack }) => { await ack(); });
+
+  // ── Week view navigation ─────────────────────────────────────────────────────
+  app.action<BlockAction>(/^navigate_(prev|next)_week$/, async ({ action, body, ack, client }) => {
     await ack();
+    await publishHomeView(client, body.team?.id ?? '', body.user.id, parseState(getButtonValue(action)));
+  });
+
+  app.action<BlockAction>('navigate_today_week', async ({ action, body, ack, client }) => {
+    await ack();
+    await publishHomeView(client, body.team?.id ?? '', body.user.id, parseState(getButtonValue(action)));
+  });
+
+  app.action<BlockAction>('navigate_to_day', async ({ action, body, ack, client }) => {
+    await ack();
+    await publishHomeView(client, body.team?.id ?? '', body.user.id, parseState(getButtonValue(action)));
+  });
+
+  app.action<BlockAction>('switch_view_week', async ({ action, body, ack, client }) => {
+    await ack();
+    await publishHomeView(client, body.team?.id ?? '', body.user.id, parseState(getButtonValue(action)));
+  });
+
+  app.action<BlockAction>('switch_view_list', async ({ action, body, ack, client }) => {
+    await ack();
+    await publishHomeView(client, body.team?.id ?? '', body.user.id, parseState(getButtonValue(action)));
   });
 
   // ── Connect Google Calendar ──────────────────────────────────────────────────
