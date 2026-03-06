@@ -1,4 +1,4 @@
-import { MemberStatusInfo, StatusFilter, ViewState } from '../types';
+import { MemberStatusInfo, StatusFilter, ViewState, WeekMemberStatus } from '../types';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Block = Record<string, any>;
@@ -48,6 +48,7 @@ export function buildHomeView(
   // ── Date navigation ─────────────────────────────────────────────────────────
   const prevDate = shiftDate(state.date, -1);
   const nextDate = shiftDate(state.date, +1);
+  const weekViewState: ViewState = { date: state.date, filter: 'all', view: 'week' };
 
   blocks.push({
     type: 'actions',
@@ -62,6 +63,7 @@ export function buildHomeView(
         style: isToday ? 'primary' : undefined,
       },
       btn('Next →', 'navigate_next', { date: nextDate, filter: state.filter }),
+      btn(':calendar: Week View', 'switch_view_week', weekViewState),
     ],
   });
 
@@ -151,34 +153,11 @@ export function buildHomeView(
       block_id: 'pagination',
       elements: [
         ...(clampedPage > 0
-          ? [
-              {
-                type: 'button' as const,
-                text: { type: 'plain_text' as const, text: '← Previous', emoji: true },
-                action_id: 'paginate_prev',
-                value: JSON.stringify(prevState),
-              },
-            ]
+          ? [{ type: 'button' as const, text: { type: 'plain_text' as const, text: '← Previous', emoji: true }, action_id: 'paginate_prev', value: JSON.stringify(prevState) }]
           : []),
-        {
-          type: 'button' as const,
-          text: {
-            type: 'plain_text' as const,
-            text: `Page ${clampedPage + 1} of ${totalPages}`,
-            emoji: false,
-          },
-          action_id: 'paginate_noop',
-          value: JSON.stringify(state),
-        },
+        { type: 'button' as const, text: { type: 'plain_text' as const, text: `Page ${clampedPage + 1} of ${totalPages}`, emoji: false }, action_id: 'paginate_noop', value: JSON.stringify(state) },
         ...(clampedPage < totalPages - 1
-          ? [
-              {
-                type: 'button' as const,
-                text: { type: 'plain_text' as const, text: 'Next →', emoji: true },
-                action_id: 'paginate_next',
-                value: JSON.stringify(nextState),
-              },
-            ]
+          ? [{ type: 'button' as const, text: { type: 'plain_text' as const, text: 'Next →', emoji: true }, action_id: 'paginate_next', value: JSON.stringify(nextState) }]
           : []),
       ],
     });
@@ -204,12 +183,7 @@ export function buildHomeView(
   } else {
     blocks.push({
       type: 'context',
-      elements: [
-        {
-          type: 'mrkdwn',
-          text: ':white_check_mark: Google Calendar connected  ·  <slack://app?action=disconnect_google_calendar|Disconnect>',
-        },
-      ],
+      elements: [{ type: 'mrkdwn', text: ':white_check_mark: Google Calendar connected' }],
     });
     blocks.push({
       type: 'actions',
@@ -221,10 +195,7 @@ export function buildHomeView(
           style: 'danger',
           confirm: {
             title: { type: 'plain_text', text: 'Disconnect Google Calendar?' },
-            text: {
-              type: 'mrkdwn',
-              text: 'Your calendar status will no longer be visible to your team.',
-            },
+            text: { type: 'mrkdwn', text: 'Your calendar status will no longer be visible to your team.' },
             confirm: { type: 'plain_text', text: 'Disconnect' },
             deny: { type: 'plain_text', text: 'Cancel' },
           },
@@ -232,6 +203,175 @@ export function buildHomeView(
       ],
     });
   }
+
+  return { type: 'home', blocks };
+}
+
+// ── Week calendar view ────────────────────────────────────────────────────────
+
+export function getWeekMonday(dateStr: string): Date {
+  const d = parseLocalDate(dateStr);
+  const dow = d.getDay(); // 0=Sun … 6=Sat
+  const diff = dow === 0 ? -6 : 1 - dow;
+  d.setDate(d.getDate() + diff);
+  return d;
+}
+
+function formatWeekRange(monday: Date): string {
+  const friday = new Date(monday);
+  friday.setDate(monday.getDate() + 4);
+  const fmt = (d: Date, opts: Intl.DateTimeFormatOptions) =>
+    d.toLocaleDateString('en-US', opts);
+  const monLabel = fmt(monday, { month: 'short', day: 'numeric' });
+  if (monday.getMonth() === friday.getMonth()) {
+    return `${monLabel}–${friday.getDate()}, ${monday.getFullYear()}`;
+  }
+  return `${monLabel} – ${fmt(friday, { month: 'short', day: 'numeric' })}, ${friday.getFullYear()}`;
+}
+
+/**
+ * Builds the week calendar view.
+ * Shows Mon–Fri with OOO members listed per day.
+ * Members without calendars or who are available are summarised in counts only.
+ */
+export function buildWeekView(
+  weekMembers: WeekMemberStatus[],
+  weekMonday: Date,
+  state: ViewState,
+  isViewerConnected: boolean,
+): { type: 'home'; blocks: Block[] } {
+  const blocks: Block[] = [];
+  const today = toDateString(new Date());
+  const weekRange = formatWeekRange(weekMonday);
+
+  // ── Header ──────────────────────────────────────────────────────────────────
+  blocks.push({
+    type: 'header',
+    text: { type: 'plain_text', text: ':calendar: Team Calendar', emoji: true },
+  });
+
+  // ── Week navigation ──────────────────────────────────────────────────────────
+  const prevMonday = new Date(weekMonday);
+  prevMonday.setDate(weekMonday.getDate() - 7);
+  const nextMonday = new Date(weekMonday);
+  nextMonday.setDate(weekMonday.getDate() + 7);
+  const listViewState: ViewState = { date: state.date, filter: 'all', view: 'list' };
+
+  blocks.push({
+    type: 'actions',
+    block_id: 'week_nav',
+    elements: [
+      btn('← Prev Week', 'navigate_prev_week', { date: toDateString(prevMonday), filter: 'all', view: 'week' }),
+      {
+        type: 'button',
+        text: { type: 'plain_text', text: 'Today', emoji: true },
+        action_id: 'navigate_today_week',
+        value: JSON.stringify({ date: today, filter: 'all', view: 'week' }),
+      },
+      btn('Next Week →', 'navigate_next_week', { date: toDateString(nextMonday), filter: 'all', view: 'week' }),
+      btn(':bust_in_silhouette: List View', 'switch_view_list', listViewState),
+    ],
+  });
+
+  blocks.push({
+    type: 'section',
+    text: { type: 'mrkdwn', text: `*Week of ${weekRange}*` },
+    accessory: {
+      type: 'button',
+      text: { type: 'plain_text', text: ':arrows_counterclockwise: Refresh', emoji: true },
+      action_id: 'refresh_view',
+      value: JSON.stringify(state),
+    },
+  });
+
+  blocks.push({ type: 'divider' });
+
+  // ── Day-by-day breakdown ─────────────────────────────────────────────────────
+  const connectedMembers = weekMembers.filter((m) => m.dayStatuses[0].status !== 'not_connected');
+  const totalConnected = connectedMembers.length;
+
+  for (let i = 0; i < 5; i++) {
+    const day = new Date(weekMonday);
+    day.setDate(weekMonday.getDate() + i);
+    const dayStr = toDateString(day);
+    const isToday = dayStr === today;
+    const dayLabel = day.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
+
+    const oooMembers = connectedMembers.filter((m) => m.dayStatuses[i].status === 'out_of_office');
+    const availableCount = connectedMembers.filter((m) => m.dayStatuses[i].status === 'available').length;
+
+    let summaryText = isToday ? `*${dayLabel}*  _(today)_` : `*${dayLabel}*`;
+    if (totalConnected === 0) {
+      summaryText += '  ·  _No calendars connected_';
+    } else if (oooMembers.length === 0) {
+      summaryText += `  ·  :large_green_circle: All ${availableCount} available`;
+    } else {
+      summaryText += `  ·  :red_circle: ${oooMembers.length} OOO  ·  :large_green_circle: ${availableCount} available`;
+    }
+
+    blocks.push({
+      type: 'section',
+      text: { type: 'mrkdwn', text: summaryText },
+      accessory: {
+        type: 'button',
+        text: { type: 'plain_text', text: 'Day View →', emoji: true },
+        action_id: 'navigate_to_day',
+        value: JSON.stringify({ date: dayStr, filter: 'all', view: 'list' }),
+      },
+    });
+
+    // OOO members listed below the day header (up to 10 context elements per block)
+    if (oooMembers.length > 0) {
+      const chunk: Block[] = [];
+      for (const m of oooMembers) {
+        if (m.avatarUrl) {
+          chunk.push({ type: 'image', image_url: m.avatarUrl, alt_text: m.displayName });
+        }
+        const reason = m.dayStatuses[i].statusLabel || 'Out of Office';
+        chunk.push({ type: 'mrkdwn', text: `*<@${m.slackUserId}>*  ·  _${reason}_` });
+        if (chunk.length >= 10) {
+          blocks.push({ type: 'context', elements: [...chunk] });
+          chunk.length = 0;
+        }
+      }
+      if (chunk.length > 0) {
+        blocks.push({ type: 'context', elements: chunk });
+      }
+    }
+  }
+
+  blocks.push({ type: 'divider' });
+
+  // ── Google Calendar connection ────────────────────────────────────────────────
+  if (!isViewerConnected) {
+    blocks.push({
+      type: 'section',
+      text: {
+        type: 'mrkdwn',
+        text: ':link: *Connect your Google Calendar* to show your status to teammates.',
+      },
+      accessory: {
+        type: 'button',
+        text: { type: 'plain_text', text: 'Connect Google Calendar', emoji: true },
+        action_id: 'connect_google_calendar',
+        style: 'primary',
+      },
+    });
+  } else {
+    blocks.push({
+      type: 'context',
+      elements: [{ type: 'mrkdwn', text: ':white_check_mark: Google Calendar connected' }],
+    });
+  }
+
+  // ── Legend ───────────────────────────────────────────────────────────────────
+  blocks.push({
+    type: 'context',
+    elements: [{
+      type: 'mrkdwn',
+      text: ':red_circle: Out of Office  ·  :large_green_circle: Available  ·  :white_circle: Calendar not connected',
+    }],
+  });
 
   return { type: 'home', blocks };
 }
@@ -265,14 +405,8 @@ export function buildLoadingView(): { type: 'home'; blocks: Block[] } {
   return {
     type: 'home',
     blocks: [
-      {
-        type: 'header',
-        text: { type: 'plain_text', text: ':calendar: Team Calendar', emoji: true },
-      },
-      {
-        type: 'section',
-        text: { type: 'mrkdwn', text: '_Loading team calendar…_' },
-      },
+      { type: 'header', text: { type: 'plain_text', text: ':calendar: Team Calendar', emoji: true } },
+      { type: 'section', text: { type: 'mrkdwn', text: '_Loading team calendar…_' } },
     ],
   };
 }
@@ -306,7 +440,6 @@ export function toDateString(date: Date): string {
   return `${y}-${m}-${d}`;
 }
 
-/** Parse "YYYY-MM-DD" as a local date (avoids UTC offset shifting the day). */
 export function parseLocalDate(dateStr: string): Date {
   const [year, month, day] = dateStr.split('-').map(Number);
   return new Date(year, month - 1, day);

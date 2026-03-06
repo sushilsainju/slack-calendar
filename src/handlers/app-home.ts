@@ -1,7 +1,7 @@
 import { App } from '@slack/bolt';
 import { WebClient } from '@slack/web-api';
-import { buildHomeView, buildLoadingView, buildErrorView, toDateString, parseLocalDate } from '../ui/home-view';
-import { getTeamStatuses } from '../services/team-status';
+import { buildHomeView, buildWeekView, buildLoadingView, buildErrorView, toDateString, parseLocalDate, getWeekMonday } from '../ui/home-view';
+import { getTeamStatuses, getTeamWeekStatuses } from '../services/team-status';
 import { isConnected } from '../services/token-store';
 import { ViewState } from '../types';
 import { logger } from '../utils/logger';
@@ -32,14 +32,25 @@ export async function publishHomeView(
   );
 
   try {
-    const [members, connected] = await Promise.all([
-      getTeamStatuses(client, teamId, targetDate, state.filter),
-      isConnected(teamId, userId),
-    ]);
-
-    const view = buildHomeView(members, state, connected);
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    await client.views.publish({ user_id: userId, view: view as any });
+    let view: any;
+
+    if (state.view === 'week') {
+      const weekMonday = getWeekMonday(state.date);
+      const [weekMembers, connected] = await Promise.all([
+        getTeamWeekStatuses(client, teamId, weekMonday),
+        isConnected(teamId, userId),
+      ]);
+      view = buildWeekView(weekMembers, weekMonday, state, connected);
+    } else {
+      const [members, connected] = await Promise.all([
+        getTeamStatuses(client, teamId, targetDate, state.filter),
+        isConnected(teamId, userId),
+      ]);
+      view = buildHomeView(members, state, connected);
+    }
+
+    await client.views.publish({ user_id: userId, view });
   } catch (err) {
     logger.error({ teamId, slackUserId: userId, err }, '[app-home] Failed to publish home view');
     await client.views
