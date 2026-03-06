@@ -1,6 +1,7 @@
 import { App } from '@slack/bolt';
-import { buildHomeView, buildLoadingView, buildErrorView, toDateString, parseLocalDate } from '../ui/home-view';
-import { getTeamStatuses } from '../services/team-status';
+import { WebClient } from '@slack/web-api';
+import { buildHomeView, buildWeekView, buildLoadingView, buildErrorView, toDateString, parseLocalDate, getWeekMonday } from '../ui/home-view';
+import { getTeamStatuses, getTeamWeekStatuses } from '../services/team-status';
 import { isConnected } from '../services/token-store';
 import { ViewState } from '../types';
 import { logger } from '../utils/logger';
@@ -13,7 +14,12 @@ export function todayString(): string {
  * Fetches team statuses and publishes the App Home view for the given user and state.
  * Call this whenever the state changes (date navigation, filter, connect/disconnect).
  */
-export async function publishHomeView(app: App, userId: string, state: ViewState): Promise<void> {
+export async function publishHomeView(
+  client: WebClient,
+  teamId: string,
+  userId: string,
+  state: ViewState,
+): Promise<void> {
   const localDate = parseLocalDate(state.date);
   const now = new Date();
   const targetDate = new Date(
@@ -26,22 +32,33 @@ export async function publishHomeView(app: App, userId: string, state: ViewState
   );
 
   try {
-    const [members, connected] = await Promise.all([
-      getTeamStatuses(app.client, targetDate, state.filter),
-      isConnected(userId),
-    ]);
-
-    const view = buildHomeView(members, state, connected);
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    await app.client.views.publish({ user_id: userId, view: view as any });
+    let view: any;
+
+    if (state.view === 'week') {
+      const weekMonday = getWeekMonday(state.date);
+      const [weekMembers, connected] = await Promise.all([
+        getTeamWeekStatuses(client, teamId, weekMonday),
+        isConnected(teamId, userId),
+      ]);
+      view = buildWeekView(weekMembers, weekMonday, state, connected);
+    } else {
+      const [members, connected] = await Promise.all([
+        getTeamStatuses(client, teamId, targetDate, state.filter),
+        isConnected(teamId, userId),
+      ]);
+      view = buildHomeView(members, state, connected);
+    }
+
+    await client.views.publish({ user_id: userId, view });
   } catch (err) {
-    logger.error({ slackUserId: userId, err }, '[app-home] Failed to publish home view');
-    await app.client.views
+    logger.error({ teamId, slackUserId: userId, err }, '[app-home] Failed to publish home view');
+    await client.views
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       .publish({ user_id: userId, view: buildErrorView(state) as any })
       .catch((innerErr) => {
         logger.error(
-          { slackUserId: userId, err: innerErr },
+          { teamId, slackUserId: userId, err: innerErr },
           '[app-home] Failed to publish error view',
         );
       });
@@ -49,15 +66,16 @@ export async function publishHomeView(app: App, userId: string, state: ViewState
 }
 
 export function registerAppHomeHandlers(app: App): void {
-  app.event('app_home_opened', async ({ event, client }) => {
+  app.event('app_home_opened', async ({ event, client, body }) => {
     if (event.tab !== 'home') return;
 
     const userId = event.user;
+    const teamId = body.team_id;
 
-    // Show a loading skeleton immediately so the tab doesn't appear stuck
+    // Show a loading skeleton immediately
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     await client.views.publish({ user_id: userId, view: buildLoadingView() as any });
 
-    await publishHomeView(app, userId, { date: todayString(), filter: 'all' });
+    await publishHomeView(client, teamId, userId, { date: todayString(), filter: 'all' });
   });
 }

@@ -9,8 +9,12 @@ function requireEnv(name: string): string {
 
 export const config = {
   slack: {
-    botToken: requireEnv('SLACK_BOT_TOKEN'),
+    /** Optional during Phase 1→2 migration — used only to seed the installations table */
+    botToken: process.env.SLACK_BOT_TOKEN,
     signingSecret: requireEnv('SLACK_SIGNING_SECRET'),
+    clientId: requireEnv('SLACK_CLIENT_ID'),
+    clientSecret: requireEnv('SLACK_CLIENT_SECRET'),
+    stateSecret: requireEnv('SLACK_STATE_SECRET'),
   },
   google: {
     clientId: requireEnv('GOOGLE_CLIENT_ID'),
