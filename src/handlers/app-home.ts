@@ -1,7 +1,17 @@
 import { App } from '@slack/bolt';
 import { WebClient } from '@slack/web-api';
-import { buildHomeView, buildWeekView, buildLoadingView, buildErrorView, toDateString, parseLocalDate, getWeekMonday } from '../ui/home-view';
-import { getTeamStatuses, getTeamWeekStatuses } from '../services/team-status';
+import {
+  buildHomeView,
+  buildWeekView,
+  buildMonthView,
+  buildLoadingView,
+  buildErrorView,
+  toDateString,
+  parseLocalDate,
+  getWeekMonday,
+  getMonthStart,
+} from '../ui/home-view';
+import { getTeamStatuses, getTeamWeekStatuses, getTeamMonthOOO } from '../services/team-status';
 import { isConnected } from '../services/token-store';
 import { ViewState } from '../types';
 import { logger } from '../utils/logger';
@@ -35,7 +45,14 @@ export async function publishHomeView(
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     let view: any;
 
-    if (state.view === 'week') {
+    if (state.view === 'month') {
+      const monthStart = parseLocalDate(getMonthStart(state.date));
+      const [memberOOO, connected] = await Promise.all([
+        getTeamMonthOOO(client, teamId, monthStart),
+        isConnected(teamId, userId),
+      ]);
+      view = buildMonthView(memberOOO, monthStart, state, connected);
+    } else if (state.view === 'week') {
       const weekMonday = getWeekMonday(state.date);
       const [weekMembers, connected] = await Promise.all([
         getTeamWeekStatuses(client, teamId, weekMonday),

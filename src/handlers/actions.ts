@@ -81,6 +81,16 @@ export function registerActionHandlers(app: App): void {
     await publishHomeView(client, body.team?.id ?? '', body.user.id, parseState(getButtonValue(action)));
   });
 
+  app.action<BlockAction>('switch_view_month', async ({ action, body, ack, client }) => {
+    await ack();
+    await publishHomeView(client, body.team?.id ?? '', body.user.id, parseState(getButtonValue(action)));
+  });
+
+  app.action<BlockAction>('navigate_to_week', async ({ action, body, ack, client }) => {
+    await ack();
+    await publishHomeView(client, body.team?.id ?? '', body.user.id, parseState(getButtonValue(action)));
+  });
+
   // ── Connect Google Calendar ──────────────────────────────────────────────────
   app.action<BlockAction>('connect_google_calendar', async ({ body, ack, client }) => {
     await ack();

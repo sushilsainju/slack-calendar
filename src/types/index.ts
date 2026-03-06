@@ -25,7 +25,21 @@ export interface MemberStatusInfo {
 }
 
 export type StatusFilter = 'all' | 'out_of_office' | 'in_meeting';
-export type ViewMode = 'list' | 'week';
+export type ViewMode = 'list' | 'week' | 'month';
+
+/** A single OOO span for a team member (inclusive dates) */
+export interface OOOSpan {
+  startDate: string; // YYYY-MM-DD
+  endDate: string;   // YYYY-MM-DD (inclusive)
+  label: string;
+}
+
+export interface MemberOOOSpans {
+  slackUserId: string;
+  displayName: string;
+  avatarUrl?: string;
+  spans: OOOSpan[];
+}
 
 export interface DayStatus {
   status: MemberStatus;
@@ -46,6 +60,6 @@ export interface ViewState {
   filter: StatusFilter;
   /** 0-indexed page for member list pagination; defaults to 0 */
   page?: number;
-  /** 'list' (default) or 'week' */
+  /** 'list' (default), 'week', or 'month' */
   view?: ViewMode;
 }

@@ -1,7 +1,7 @@
 import { google } from 'googleapis';
 import { OAuth2Client } from 'google-auth-library';
 import { config } from '../config';
-import { GoogleTokens, MemberStatus, DayStatus } from '../types';
+import { GoogleTokens, MemberStatus, DayStatus, OOOSpan } from '../types';
 import { createOAuthState } from './oauth-state';
 import { toDateString } from '../ui/home-view';
 import { logger } from '../utils/logger';
@@ -216,6 +216,76 @@ export async function getWeekStatuses(
   }
 
   return { dayStatuses, newTokens };
+}
+
+/**
+ * Fetches all OOO spans for a user in a given calendar month.
+ * Makes a single Google Calendar API call covering the full month.
+ * Returns inclusive date ranges (endDate is the last day of OOO, not exclusive).
+ */
+export async function getMonthOOOSpans(
+  tokens: GoogleTokens,
+  monthStart: Date,
+): Promise<{ spans: OOOSpan[]; newTokens?: GoogleTokens }> {
+  const auth = createOAuth2Client();
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  auth.setCredentials(tokens as any);
+
+  let newTokens: GoogleTokens | undefined;
+  auth.on('tokens', (refreshed) => { newTokens = { ...tokens, ...refreshed }; });
+
+  const calendar = google.calendar({ version: 'v3', auth });
+
+  // Last moment of the last day of the month
+  const monthEnd = new Date(monthStart.getFullYear(), monthStart.getMonth() + 1, 0, 23, 59, 59, 999);
+
+  const response = await calendar.events.list({
+    calendarId: 'primary',
+    timeMin: monthStart.toISOString(),
+    timeMax: monthEnd.toISOString(),
+    singleEvents: true,
+    orderBy: 'startTime',
+    maxResults: 250,
+  });
+
+  const events = response.data.items || [];
+  const spans: OOOSpan[] = [];
+
+  for (const e of events) {
+    const isOOOType = e.eventType === 'outOfOffice';
+    const isAllDayOOO =
+      Boolean(e.start?.date) &&
+      !e.start?.dateTime &&
+      OOO_KEYWORDS.some((kw) => (e.summary ?? '').toLowerCase().includes(kw));
+
+    if (!isOOOType && !isAllDayOOO) continue;
+
+    // Determine start date
+    const startDate = e.start?.date ?? e.start?.dateTime?.substring(0, 10) ?? '';
+    if (!startDate) continue;
+
+    // For all-day events, Google Calendar end.date is exclusive — convert to inclusive
+    let endDate: string;
+    if (e.end?.date) {
+      const d = new Date(e.end.date + 'T00:00:00');
+      d.setDate(d.getDate() - 1);
+      endDate = toDateString(d);
+    } else {
+      endDate = e.end?.dateTime?.substring(0, 10) ?? startDate;
+    }
+
+    // Clamp to the month window for display
+    const monthStartStr = toDateString(monthStart);
+    const monthEndStr = toDateString(monthEnd);
+    const clampedStart = startDate < monthStartStr ? monthStartStr : startDate;
+    const clampedEnd = endDate > monthEndStr ? monthEndStr : endDate;
+
+    if (clampedEnd >= monthStartStr) {
+      spans.push({ startDate: clampedStart, endDate: clampedEnd, label: e.summary ?? 'Out of Office' });
+    }
+  }
+
+  return { spans, newTokens };
 }
 
 function formatTimeRange(start: Date, end: Date): string {
