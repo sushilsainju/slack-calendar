@@ -1,8 +1,9 @@
 import { google } from 'googleapis';
 import { OAuth2Client } from 'google-auth-library';
 import { config } from '../config';
-import { GoogleTokens, MemberStatus } from '../types';
+import { GoogleTokens, MemberStatus, DayStatus } from '../types';
 import { createOAuthState } from './oauth-state';
+import { toDateString } from '../ui/home-view';
 import { logger } from '../utils/logger';
 
 export interface CalendarStatus {
@@ -139,6 +140,82 @@ export async function getStatusForDate(
   }
 
   return { status: 'available', newTokens };
+}
+
+const OOO_KEYWORDS = ['out of office', 'ooo', 'vacation', 'holiday', 'leave', 'pto', 'off'];
+
+/**
+ * Fetches OOO/availability status for Mon–Fri of the given week in a single API call.
+ * "In meeting" is intentionally excluded — it is only meaningful in real-time (list view).
+ */
+export async function getWeekStatuses(
+  tokens: GoogleTokens,
+  weekMonday: Date,
+): Promise<{ dayStatuses: DayStatus[]; newTokens?: GoogleTokens }> {
+  const auth = createOAuth2Client();
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  auth.setCredentials(tokens as any);
+
+  let newTokens: GoogleTokens | undefined;
+  auth.on('tokens', (refreshed) => { newTokens = { ...tokens, ...refreshed }; });
+
+  const calendar = google.calendar({ version: 'v3', auth });
+
+  const weekFriday = new Date(weekMonday);
+  weekFriday.setDate(weekMonday.getDate() + 4);
+  weekFriday.setHours(23, 59, 59, 999);
+
+  const response = await calendar.events.list({
+    calendarId: 'primary',
+    timeMin: weekMonday.toISOString(),
+    timeMax: weekFriday.toISOString(),
+    singleEvents: true,
+    orderBy: 'startTime',
+    maxResults: 250,
+  });
+
+  const events = response.data.items || [];
+  const dayStatuses: DayStatus[] = [];
+
+  for (let i = 0; i < 5; i++) {
+    const day = new Date(weekMonday);
+    day.setDate(weekMonday.getDate() + i);
+    const dayStr = toDateString(day);
+
+    // Filter events that overlap this day
+    const dayEvents = events.filter((e) => {
+      if (e.start?.date && e.end?.date) {
+        // All-day: Google Calendar end date is exclusive
+        return e.start.date <= dayStr && dayStr < e.end.date;
+      }
+      if (e.start?.dateTime) {
+        const startDate = e.start.dateTime.substring(0, 10);
+        const endDate = (e.end?.dateTime ?? e.start.dateTime).substring(0, 10);
+        return startDate <= dayStr && dayStr <= endDate;
+      }
+      return false;
+    });
+
+    const oooEvent = dayEvents.find((e) => e.eventType === 'outOfOffice');
+    if (oooEvent) {
+      dayStatuses.push({ status: 'out_of_office', statusLabel: oooEvent.summary || 'Out of Office' });
+      continue;
+    }
+
+    const allDayOoo = dayEvents.find((e) => {
+      if (!e.start?.date) return false; // keyword match only on all-day events
+      const title = (e.summary || '').toLowerCase();
+      return OOO_KEYWORDS.some((kw) => title.includes(kw));
+    });
+    if (allDayOoo) {
+      dayStatuses.push({ status: 'out_of_office', statusLabel: allDayOoo.summary || 'Out of Office' });
+      continue;
+    }
+
+    dayStatuses.push({ status: 'available' });
+  }
+
+  return { dayStatuses, newTokens };
 }
 
 function formatTimeRange(start: Date, end: Date): string {
