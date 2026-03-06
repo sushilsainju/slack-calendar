@@ -25,6 +25,20 @@ export interface MemberStatusInfo {
 }
 
 export type StatusFilter = 'all' | 'out_of_office' | 'in_meeting';
+export type ViewMode = 'list' | 'week';
+
+export interface DayStatus {
+  status: MemberStatus;
+  statusLabel?: string;
+}
+
+export interface WeekMemberStatus {
+  slackUserId: string;
+  displayName: string;
+  avatarUrl?: string;
+  /** Mon–Fri statuses (5 entries) */
+  dayStatuses: DayStatus[];
+}
 
 export interface ViewState {
   /** ISO date string "YYYY-MM-DD" */
@@ -32,4 +46,6 @@ export interface ViewState {
   filter: StatusFilter;
   /** 0-indexed page for member list pagination; defaults to 0 */
   page?: number;
+  /** 'list' (default) or 'week' */
+  view?: ViewMode;
 }
