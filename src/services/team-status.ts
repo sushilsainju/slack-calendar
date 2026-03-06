@@ -1,7 +1,7 @@
 import { WebClient } from '@slack/web-api';
-import { MemberStatusInfo, StatusFilter, WeekMemberStatus, DayStatus } from '../types';
+import { MemberStatusInfo, StatusFilter, WeekMemberStatus, DayStatus, MemberOOOSpans, OOOSpan } from '../types';
 import { getTokenRecord, saveTokens } from './token-store';
-import { getStatusForDate, getWeekStatuses } from './google-calendar';
+import { getStatusForDate, getWeekStatuses, getMonthOOOSpans } from './google-calendar';
 import { rosterCache, statusCache } from './cache';
 import { mapWithConcurrency } from '../utils/concurrency';
 import { logger } from '../utils/logger';
@@ -149,6 +149,72 @@ export async function getTeamWeekStatuses(
       }
       logger.error({ teamId, slackUserId: user.id, err }, '[team-status] Failed to fetch week statuses');
       return { ...base, dayStatuses: UNKNOWN };
+    }
+  });
+}
+
+/**
+ * Fetches OOO date spans for every connected team member for the given calendar month.
+ * Makes one Google Calendar API call per user, covering the full month.
+ * Cached for 5 minutes (OOO events don't change frequently).
+ */
+export async function getTeamMonthOOO(
+  slackClient: WebClient,
+  teamId: string,
+  monthStart: Date,
+): Promise<MemberOOOSpans[]> {
+  const rosterKey = `roster:${teamId}`;
+  let eligible = rosterCache.get(rosterKey);
+  if (!eligible) {
+    const allUsers: NonNullable<Awaited<ReturnType<typeof slackClient.users.list>>['members']> = [];
+    let cursor: string | undefined;
+    do {
+      const response = await slackClient.users.list({ limit: 200, cursor });
+      allUsers.push(...(response.members || []));
+      cursor = response.response_metadata?.next_cursor || undefined;
+    } while (cursor);
+
+    eligible = allUsers.filter(
+      (u) => u.id && !u.deleted && !u.is_bot && u.id !== 'USLACKBOT',
+    );
+    rosterCache.set(rosterKey, eligible, ROSTER_TTL_MS);
+  }
+
+  const monthStr = toDateString(monthStart);
+  const MONTH_CACHE_TTL = 5 * 60 * 1000; // 5 minutes
+
+  return mapWithConcurrency(eligible, 15, async (user): Promise<MemberOOOSpans> => {
+    const base: MemberOOOSpans = {
+      slackUserId: user.id!,
+      displayName: user.profile?.display_name || user.real_name || user.name || user.id!,
+      avatarUrl: user.profile?.image_48 || undefined,
+      spans: [],
+    };
+
+    const record = await getTokenRecord(teamId, user.id!);
+    if (!record) return base;
+
+    const cacheKey = `month-ooo:${teamId}:${user.id}:${monthStr}`;
+    const cached = statusCache.get(cacheKey) as OOOSpan[] | undefined;
+    if (cached) return { ...base, spans: cached };
+
+    try {
+      const result = await getMonthOOOSpans(record.tokens, monthStart);
+
+      if (result.newTokens) {
+        await saveTokens(teamId, user.id!, record.googleEmail, result.newTokens);
+      }
+
+      statusCache.set(cacheKey, result.spans, MONTH_CACHE_TTL);
+      return { ...base, spans: result.spans };
+    } catch (err: unknown) {
+      const e = err as { code?: number; response?: { status?: number } };
+      if (e?.code === 429 || e?.response?.status === 429) {
+        logger.warn({ teamId, slackUserId: user.id }, '[team-status] Google API rate limited (month OOO)');
+      } else {
+        logger.error({ teamId, slackUserId: user.id, err }, '[team-status] Failed to fetch month OOO spans');
+      }
+      return base;
     }
   });
 }
