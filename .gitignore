@@ -4,3 +4,4 @@ dist/
 tokens.json
 *.log
 .DS_Store
+.claude/
